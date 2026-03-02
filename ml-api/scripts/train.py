@@ -6,11 +6,15 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score, classification_report
 import pickle
-import os
+from pathlib import Path
 
 # ── 1. CARGAR DATOS ──────────────────────────────────────────────────────────
-# Carga el mismo CSV que subiste a Supabase
-df = pd.read_csv('../../data/students.csv')
+# Path relativo al script: ml-api/scripts/ -> proyecto/data/students.csv
+SCRIPT_DIR = Path(__file__).resolve().parent
+DATA_PATH = SCRIPT_DIR.parent.parent / "data" / "students.csv"
+MODEL_DIR = SCRIPT_DIR.parent / "model"  # ml-api/model
+MODEL_PATH = MODEL_DIR / "model.pkl"
+df = pd.read_csv(DATA_PATH)
 
 print(f"Dataset cargado: {len(df)} filas, {len(df.columns)} columnas")
 print(df.head())
@@ -93,9 +97,9 @@ model_data = {
     'target': target
 }
 
-os.makedirs('../model', exist_ok=True)
-with open('../model/model.pkl', 'wb') as f:
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
+with open(MODEL_PATH, 'wb') as f:
     pickle.dump(model_data, f)
 
-print("\n✅ Modelo guardado en ../model/model.pkl")
-print(f"   Tamaño del archivo: {os.path.getsize('../model/model.pkl') / 1024:.1f} KB")
+print(f"\n✅ Modelo guardado en {MODEL_PATH}")
+print(f"   Tamaño del archivo: {MODEL_PATH.stat().st_size / 1024:.1f} KB")
