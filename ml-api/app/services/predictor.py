@@ -1,62 +1,58 @@
-"""
-Predictor service - loads model and runs inference.
-Purpose: Centralized model loading and prediction logic.
-Modify: Change model path, add preprocessing, or support multiple models.
+# ml-api/app/services/predictor.py
 
-To retrain and replace the model:
-1. Run: python scripts/train.py
-2. Ensure ml-api/model/model.pkl exists
-3. Restart the API
-"""
+import pickle
+import numpy as np
 import os
-from pathlib import Path
 
-import joblib
-
-
-class PredictorService:
+class Predictor:
     def __init__(self):
-        self._model = None
-        self._model_path = Path(__file__).resolve().parent.parent.parent / "model" / "model.pkl"
+        self.model = None
+        self.encoders = None
+        self.features = None
+        self._load_model()
+
+    def _load_model(self):
+        # Busca el modelo en la carpeta model/
+        model_path = os.path.join(os.path.dirname(__file__), '../../model/model.pkl')
+        
+        if not os.path.exists(model_path):
+            print("⚠️  model.pkl no encontrado — el servidor arrancará sin modelo")
+            return
+        
+        with open(model_path, 'rb') as f:
+            data = pickle.load(f)
+        
+        self.model = data['model']
+        self.encoders = data['encoders']
+        self.features = data['features']
+        print("✅ Modelo cargado exitosamente")
 
     @property
-    def is_loaded(self) -> bool:
-        return self._model is not None
-
-    def load_model(self) -> None:
-        """Load model.pkl from model/ directory. Fails gracefully if missing."""
-        if not self._model_path.exists():
-            return
-        try:
-            self._model = joblib.load(self._model_path)
-        except Exception:
-            self._model = None
+    def is_loaded(self):
+        return self.model is not None
 
     def predict(self, input_data: dict) -> dict:
-        """Run inference. Returns {prediction, confidence, label?}."""
-        if not self._model:
-            raise RuntimeError("Model not loaded")
-
-        # Build feature vector from dict. Adapt to your model's expected input format.
-        # Example: model expects [f1, f2, f3] in order
-        feature_keys = sorted(input_data.keys())
-        X = [[input_data[k] for k in feature_keys]]
-
-        pred = self._model.predict(X)[0]
-
-        # Try to get probabilities for confidence (classification models)
-        try:
-            probs = self._model.predict_proba(X)[0]
-            confidence = float(max(probs))
-        except AttributeError:
-            confidence = 0.95  # Fallback for regression
-
+        # Construye el vector de features en el orden correcto
+        row = []
+        for feature in self.features:
+            value = input_data[feature]
+            # Si la columna es categórica, la convierte con el encoder
+            if feature in self.encoders:
+                value = self.encoders[feature].transform([value])[0]
+            row.append(value)
+        
+        X = np.array([row])
+        
+        # predict_proba devuelve la probabilidad de cada clase [reprueba, aprueba]
+        probabilities = self.model.predict_proba(X)[0]
+        prediction = int(self.model.predict(X)[0])
+        
         return {
-            "prediction": int(pred) if hasattr(pred, "item") else float(pred),
-            "confidence": confidence,
-            "label": str(pred),
+            'prediction': prediction,
+            'label': 'Aprueba' if prediction == 1 else 'Reprueba',
+            'confidence': float(max(probabilities)),
+            'probabilities': {
+                'pass': float(probabilities[1]),
+                'fail': float(probabilities[0])
+            }
         }
-
-
-# Singleton instance for use in routes
-predictor = PredictorService()

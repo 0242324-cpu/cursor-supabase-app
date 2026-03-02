@@ -1,81 +1,101 @@
-"""
-Standalone training script.
-Purpose: Load CSV, train model, save to model/model.pkl.
-Modify: Adapt LOAD DATA, PREPROCESS, TRAIN sections to your dataset.
-
-TODO: Update file path, target column, and feature columns for your data.
-"""
-import sys
-from pathlib import Path
+# ml-api/scripts/train.py
 
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, confusion_matrix
-import joblib
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import accuracy_score, classification_report
+import pickle
+import os
 
-# Path to CSV. Default: ../../data/your_data.csv
-SCRIPT_DIR = Path(__file__).resolve().parent
-DATA_PATH = SCRIPT_DIR.parent.parent / "data"
-CSV_FILE = DATA_PATH / "sample_data.csv"  # TODO: Replace with your CSV filename
+# ── 1. CARGAR DATOS ──────────────────────────────────────────────────────────
+# Carga el mismo CSV que subiste a Supabase
+df = pd.read_csv('../../data/students.csv')
 
-MODEL_DIR = SCRIPT_DIR.parent / "model"
-MODEL_PATH = MODEL_DIR / "model.pkl"
+print(f"Dataset cargado: {len(df)} filas, {len(df.columns)} columnas")
+print(df.head())
 
-# TODO: Set these for your dataset
-TARGET_COLUMN = "target"  # Column to predict
-FEATURE_COLUMNS = None  # None = use all except target; or list of column names
+# ── 2. CREAR LA VARIABLE OBJETIVO ────────────────────────────────────────────
+# Esta es exactamente la misma lógica que usamos en Supabase con SQL
+df['pass_math'] = (df['math_score'] >= 60).astype(int)
 
+print(f"\nDistribución de pass_math:")
+print(df['pass_math'].value_counts())
 
-def main():
-    # -------- LOAD DATA --------
-    if not CSV_FILE.exists():
-        print(f"CSV not found at {CSV_FILE}")
-        print("Place your CSV in the data/ folder and update CSV_FILE in train.py")
-        sys.exit(1)
+# ── 3. PREPROCESAR ───────────────────────────────────────────────────────────
+# Las columnas categóricas (texto) hay que convertirlas a números
+# porque los modelos de ML solo entienden números
 
-    df = pd.read_csv(CSV_FILE)
-    print(f"Loaded {len(df)} rows, {len(df.columns)} columns")
+# Columnas que usaremos como features (inputs del modelo)
+features = ['gender', 'ethnicity', 'parental_education', 
+            'lunch', 'test_prep', 'reading_score', 'writing_score']
 
-    # -------- PREPROCESS --------
-    # TODO: Handle missing values, encoding, scaling
-    df = df.dropna()
+# Columna que queremos predecir (output del modelo)
+target = 'pass_math'
 
-    if TARGET_COLUMN not in df.columns:
-        print(f"Target column '{TARGET_COLUMN}' not found. Columns: {list(df.columns)}")
-        sys.exit(1)
+# Separamos X (inputs) e y (output)
+X = df[features].copy()
+y = df[target]
 
-    X = df.drop(columns=[TARGET_COLUMN]) if FEATURE_COLUMNS is None else df[FEATURE_COLUMNS]
-    y = df[TARGET_COLUMN]
+# Convertimos columnas de texto a números usando LabelEncoder
+# Guardamos los encoders para usarlos después en las predicciones
+encoders = {}
+categorical_cols = ['gender', 'ethnicity', 'parental_education', 'lunch', 'test_prep']
 
-    # Encode if needed (sklearn classifiers expect numeric targets)
-    if y.dtype == "object" or y.dtype.name == "category":
-        from sklearn.preprocessing import LabelEncoder
-        le = LabelEncoder()
-        y = le.fit_transform(y)
-        # Save encoder for inference if needed
+for col in categorical_cols:
+    le = LabelEncoder()
+    X[col] = le.fit_transform(X[col])
+    encoders[col] = le
+    print(f"{col}: {dict(zip(le.classes_, le.transform(le.classes_)))}")
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# ── 4. DIVIDIR EN TRAIN Y TEST ───────────────────────────────────────────────
+# 80% para entrenar, 20% para evaluar
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
 
-    # -------- TRAIN --------
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
+print(f"\nTrain: {len(X_train)} filas — Test: {len(X_test)} filas")
 
-    # -------- EVALUATE --------
-    y_pred = model.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    print(f"Accuracy: {acc:.4f}")
-    print("Confusion matrix:")
-    print(confusion_matrix(y_test, y_pred))
-    if hasattr(model, "feature_importances_"):
-        fi = dict(zip(X.columns, model.feature_importances_))
-        print("Feature importances:", fi)
+# ── 5. ENTRENAR EL MODELO ────────────────────────────────────────────────────
+# Random Forest: conjunto de múltiples árboles de decisión
+model = RandomForestClassifier(
+    n_estimators=100,   # 100 árboles en el bosque
+    max_depth=10,       # profundidad máxima de cada árbol
+    random_state=42     # para reproducibilidad
+)
 
-    # -------- SAVE --------
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, MODEL_PATH)
-    print(f"Model saved to {MODEL_PATH}")
+model.fit(X_train, y_train)
+print("\nModelo entrenado exitosamente")
 
+# ── 6. EVALUAR EL MODELO ─────────────────────────────────────────────────────
+y_pred = model.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
 
-if __name__ == "__main__":
-    main()
+print(f"\nAccuracy: {accuracy:.2%}")
+print("\nReporte completo:")
+print(classification_report(y_test, y_pred, target_names=['Reprueba', 'Aprueba']))
+
+# Feature importance: qué tan importante es cada variable para el modelo
+print("\nImportancia de cada feature:")
+for feat, imp in sorted(zip(features, model.feature_importances_), 
+                         key=lambda x: x[1], reverse=True):
+    print(f"  {feat}: {imp:.3f}")
+
+# ── 7. GUARDAR EL MODELO ─────────────────────────────────────────────────────
+# Guardamos todo lo necesario para hacer predicciones:
+# - el modelo entrenado
+# - los encoders para convertir texto a números
+# - la lista de features en el orden correcto
+model_data = {
+    'model': model,
+    'encoders': encoders,
+    'features': features,
+    'target': target
+}
+
+os.makedirs('../model', exist_ok=True)
+with open('../model/model.pkl', 'wb') as f:
+    pickle.dump(model_data, f)
+
+print("\n✅ Modelo guardado en ../model/model.pkl")
+print(f"   Tamaño del archivo: {os.path.getsize('../model/model.pkl') / 1024:.1f} KB")
