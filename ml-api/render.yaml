@@ -1,8 +1,9 @@
 # ml-api/render.yaml
+# Render web service config for SupplyPredict API
 
 services:
   - type: web
-    name: eduinsights-ml-api
+    name: supplypredict-api
     env: python
     rootDir: ml-api
     buildCommand: pip install -r requirements.txt
@@ -10,3 +11,11 @@ services:
     envVars:
       - key: PORT
         value: 8000
+      - key: SUPABASE_URL
+        sync: false          # set manually in Render dashboard
+      - key: SUPABASE_KEY
+        sync: false          # anon/public key
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false          # for write operations (not used by API reads)
+      - key: ALLOWED_ORIGINS
+        value: "*"           # replace with your Vercel frontend URL in production

@@ -1,49 +1,60 @@
 """
-FastAPI application entry point.
-Purpose: Main app, CORS, lifespan, and route mounting.
-Modify: Add auth, new routes, or middleware here.
+SupplyPredict API — entry point.
+Endpoints:
+  GET /health
+  GET /products
+  GET /products/{id_producto}
+  GET /forecasts/{id_producto}
+  GET /risk-snapshot
 """
-from contextlib import asynccontextmanager
+from __future__ import annotations
+
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes.predict import router as predict_router
-from app.services.predictor import predictor
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Load ML model on startup."""
-    predictor.load_model()
-    yield
-    # Cleanup if needed
-    pass
-
+from app.models.schema import HealthResponse
+from app.routes.forecasts import router as forecasts_router
+from app.routes.products import router as products_router
+from app.routes.risk import router as risk_router
 
 app = FastAPI(
-    title="cursor-supabase-ml-api",
-    description="ML prediction API for cursor-supabase-app",
-    lifespan=lifespan,
+    title="SupplyPredict API",
+    description=(
+        "Stockout prediction and reorder-point API for Toyo Foods. "
+        "Powered by Prophet (demand forecasting) and LightGBM (risk classification)."
+    ),
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
-# CORS: allow all origins in development. In production, restrict to your frontend domain.
+# CORS — allow Vercel frontend + localhost in dev
+_ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", "*").split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET"],
     allow_headers=["*"],
 )
 
-# Mount routes. To add a new route: create app/routes/xyz.py and app.add_router(xyz_router)
-app.include_router(predict_router, prefix="", tags=["predict"])
+app.include_router(products_router)
+app.include_router(forecasts_router)
+app.include_router(risk_router)
 
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResponse, tags=["meta"])
 def health():
-    """Health check endpoint. Returns model_loaded status."""
-    return {
-        "status": "ok",
-        "model_loaded": predictor.is_loaded,
-    }
+    """Liveness check. Returns Supabase URL and API version."""
+    supabase_url = os.getenv("SUPABASE_URL", "not-configured")
+    return HealthResponse(
+        status="ok",
+        supabase_url=supabase_url,
+    )
